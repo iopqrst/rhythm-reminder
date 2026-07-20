@@ -51,3 +51,53 @@ export function nextWorkWindowStart(
   }
   return now + 60000;
 }
+
+/** 给定一组时间段，判断某"HH:MM + 星期"是否落在其中任意一个（启用且星期匹配）内 */
+export function withinAnyWindow(
+  windows: { enabled?: boolean; start: string; end: string; days?: number[] }[] | undefined,
+  clock: string,
+  weekday: number,
+): boolean {
+  if (!windows || windows.length === 0) return false;
+  const cur = clockToMinutes(clock);
+  for (const w of windows) {
+    if (w.enabled === false) continue;
+    if (w.days && w.days.length > 0 && !w.days.includes(weekday)) continue;
+    const s = clockToMinutes(w.start);
+    const e = clockToMinutes(w.end);
+    if (s === e) continue;
+    if (s < e) {
+      if (cur >= s && cur < e) return true;
+    } else if (cur >= s || cur < e) return true; // 跨午夜
+  }
+  return false;
+}
+
+/**
+ * 给定一个候选触发时刻 base，返回"不落在任何勿扰时段内"的最早时刻（>= base）。
+ * 用于 nextFireTime：若 base 落在午休等勿扰窗内，顺延到该窗结束之后。
+ */
+export function nextOutsideQuiet(
+  base: number,
+  windows: { enabled?: boolean; start: string; end: string; days?: number[] }[] | undefined,
+  getLocal: (ms: number) => { clock: string; weekday: number },
+): number {
+  if (!windows || windows.length === 0) return base;
+  let t = base;
+  for (let guard = 0; guard < 30; guard++) {
+    const loc = getLocal(t);
+    const hit = windows.find((w) => {
+      if (w.enabled === false) return false;
+      if (w.days && w.days.length > 0 && !w.days.includes(loc.weekday)) return false;
+      return withinWorkWindow(loc.clock, w);
+    });
+    if (!hit) return t;
+    // 跳到该窗当天的结束时刻之后
+    const dayBase = new Date(t);
+    const base0 = new Date(dayBase.getFullYear(), dayBase.getMonth(), dayBase.getDate(), 0, 0, 0, 0);
+    const endMin = clockToMinutes(hit.end);
+    t = base0.getTime() + endMin * 60000 + 1000;
+    if (t <= base) t = base + 86400000; // 安全兜底
+  }
+  return t;
+}

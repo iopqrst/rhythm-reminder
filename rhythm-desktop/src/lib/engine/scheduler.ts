@@ -3,7 +3,7 @@
 // 不 import 任何 OS/浏览器 API；时间本地化通过注入 getLocal 实现，便于测试。
 
 import type { Reminder, ReminderState, RuntimeContext, GateConfig } from './types';
-import { withinWorkWindow, nextWorkWindowStart, clockToMinutes } from './time';
+import { withinWorkWindow, nextWorkWindowStart, nextOutsideQuiet, withinAnyWindow } from './time';
 
 /** 由调度层注入：把 epoch ms 转成本地 {clock:"HH:MM", weekday:0-6} */
 export type GetLocal = (ms: number) => { clock: string; weekday: number };
@@ -65,6 +65,8 @@ export function nextFireTime(
   if (s.snoozedUntil && s.snoozedUntil > now) {
     base = Math.max(base, s.snoozedUntil);
   }
+  // 勿扰时段（如午休）：若 base 落在其中，顺延到该时段结束后
+  base = nextOutsideQuiet(base, r.quietWindows, getLocal);
   return base;
 }
 
@@ -89,6 +91,13 @@ export function shouldFire(
     const loc = getLocal(ctx.now);
     if (!withinWorkWindow(loc.clock, r.workWindow) || !dayAllowed(r, loc.weekday))
       return { fire: false, warn: false, reason: 'outside-work-window' };
+  }
+
+  // 勿扰时段（如午休）：落在其中不触发
+  {
+    const loc = getLocal(ctx.now);
+    if (withinAnyWindow(r.quietWindows, loc.clock, loc.weekday))
+      return { fire: false, warn: false, reason: 'quiet' };
   }
 
   if (ctx.now >= s.phaseEndsAt) return { fire: true };

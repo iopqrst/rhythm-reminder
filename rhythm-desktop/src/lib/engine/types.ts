@@ -74,6 +74,8 @@ export interface Reminder {
   sound: SoundName;
   enabled: boolean;
   workWindow: WorkWindow;
+  /** 勿扰时段（如午休）：落在这些时间段内不提醒。多时段数组，支持按星期过滤。 */
+  quietWindows?: WorkWindow[];
   gates: GateConfig;
   createdAt: number; // epoch ms
   updatedAt: number; // epoch ms（云同步冲突解决依据）

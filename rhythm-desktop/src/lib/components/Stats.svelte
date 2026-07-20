@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { getEngine } from '../store';
+  import { getEngine, getLocal } from '../store';
+  import { clockToMinutes } from '../engine/index';
   import type { Reminder } from '../engine/index';
   interface Props { reminders: Reminder[]; }
   let { reminders }: Props = $props();
@@ -37,12 +38,37 @@
   const weekTotal = $derived(daily.reduce((a, b) => a + b, 0));
   const todayDone = $derived(daily[6]);
   const maxDaily = $derived(Math.max(1, ...daily));
-  // 完成率：今天已完成 / (今天已完成 + 预计还应触发次数)。粗略估计：启用提醒数 * 每个到今天应触发次数难以精确，
-  // M1 用"今天完成数 / max(1, 启用提醒数)"作为直观进度，避免伪造精确百分比。
   const enabledCount = $derived(reminders.filter((r) => r.enabled).length);
-  const completion = $derived(
-    enabledCount === 0 ? 0 : Math.min(100, Math.round((todayDone / enabledCount) * 100)),
-  );
+
+  // 今日"预计应触发次数"：按各启用提醒已过去的工作时段 / 间隔估算（而非简单用启用数）。
+  // 公式：max(0, floor((当前时刻 - 今日工作窗起点) / 间隔分钟))，逐一求和。
+  function expectedToday(): number {
+    const now = Date.now();
+    let total = 0;
+    for (const r of reminders) {
+      if (!r.enabled) continue;
+      const startMs = dayStart(0);
+      let from = startMs;
+      if (r.workWindow.enabled) {
+        const sMin = clockToMinutes(r.workWindow.start);
+        const base0 = new Date();
+        base0.setHours(0, 0, 0, 0);
+        const ws = base0.getTime() + sMin * 60000;
+        if (now < ws) continue; // 今天工作窗还没开始
+        from = Math.max(from, ws);
+      }
+      const interval = r.mode === 'pomodoro' ? r.workMin : r.intervalMin;
+      total += Math.max(0, Math.floor((now - from) / 60000 / interval));
+    }
+    return total;
+  }
+
+  // 完成率：今日完成 / 今日预计应触发（更贴近真实达成度）
+  const completion = $derived.by(() => {
+    const exp = expectedToday();
+    if (exp <= 0) return todayDone > 0 ? 100 : 0;
+    return Math.min(100, Math.round((todayDone / exp) * 100));
+  });
 </script>
 
 <div class="greet">
@@ -68,5 +94,5 @@
 </div>
 
 <div class="muted" style="font-size:12px;padding:0 4px;">
-  今天已完成 {todayDone} 次 · 当前生效提醒 {enabledCount} 个
+  今天已完成 {todayDone} 次 · 预计应触发 {expectedToday()} 次 · 生效提醒 {enabledCount} 个
 </div>

@@ -171,7 +171,7 @@
     if (provider.kind === 'tauri') {
       listen<string>('global-shortcut', (e) => {
         if (e.payload === 'toggle-pause') toggleGlobalPause();
-        else if (e.payload === 'skip-break' && activeBreak) onSkip(activeBreak.id);
+        else if (e.payload === 'skip-break' && activeBreak && !activeBreak.gates.strictMode) onSkip(activeBreak.id);
       })
         .then((u) => (unlisten = u))
         .catch(() => {});

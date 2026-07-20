@@ -33,6 +33,7 @@ function base(kind: ReminderKind, label: string, message: string): Omit<Reminder
     sound: 'bell',
     enabled: true,
     workWindow: defaultWorkWindow(),
+    quietWindows: [],
     gates: defaultGates(),
   };
 }
