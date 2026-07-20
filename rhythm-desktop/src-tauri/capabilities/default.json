@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "节奏 Rhythm 默认权限：核心 + 托盘/通知/自启动/快捷键/SQLite",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "positioner:allow-move-window-to-tray",
+    "positioner:allow-move-window-to-center",
+    "notification:default",
+    "notification:allow-notify",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "autostart:default",
+    "global-shortcut:default",
+    "sql:default",
+    "sql:allow-execute",
+    "sql:allow-select",
+    "sql:allow-load"
+  ]
+}
