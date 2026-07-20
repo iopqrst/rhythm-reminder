@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { engine, getLocal } from '../store';
+  import { getEngine, getLocal } from '../store';
   import type { Reminder } from '../engine/index';
 
   interface Props {
@@ -29,7 +29,7 @@
   }
 
   const todayDone = $derived(
-    reminders.filter((r) => isToday(engine.getState(r.id)?.lastTriggeredAt)).length,
+    reminders.filter((r) => isToday(getEngine().getState(r.id)?.lastTriggeredAt)).length,
   );
   const enabledCount = $derived(reminders.filter((r) => r.enabled).length);
   const pct = $derived(Math.min(95, enabledCount === 0 ? 0 : 40 + todayDone * 18));

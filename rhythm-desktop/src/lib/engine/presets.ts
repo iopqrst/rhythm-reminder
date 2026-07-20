@@ -67,6 +67,7 @@ export function createReminderFromTemplate(
         workMin: 25,
         breakMin: 5,
         longEvery: 4,
+        longBreakMin: 15,
       };
       break;
     case 'custom':

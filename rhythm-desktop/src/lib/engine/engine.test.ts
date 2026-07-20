@@ -184,17 +184,35 @@ test('跳过：不计入完成，仅重排', () => {
 });
 
 test('暂停/恢复', () => {
-  const r = noGateReminder('eye');
+  const r = noGateReminder('eye'); // 20min
   const s = createInitialState(r, 1_000_000);
-  s.phaseEndsAt = 1_000_000;
-  applyPause(s, 1_000_000 + 10 * 60000);
+  s.phaseEndsAt = 1_000_000 + 10 * 60000; // 还剩 10 分钟
+  const pausedAt = 1_000_000;
+  applyPause(s, pausedAt + 60 * 60000, pausedAt);
   assert.equal(s.phase, 'paused');
-  let res = shouldFire(r, s, ctxAt(1_000_000), getLocal);
+  let res = shouldFire(r, s, ctxAt(pausedAt), getLocal);
   assert.equal(res.fire, false);
   assert.equal(res.reason, 'paused');
-  resume(s, 1_000_000);
+  // 5 分钟后恢复：剩余 10 分钟应顺延，而非"立刻触发"或"只剩 1 分钟"
+  const resumeAt = pausedAt + 5 * 60000;
+  resume(r, s, resumeAt);
   assert.equal(s.pausedUntil, undefined);
   assert.equal(s.phase, 'working');
+  // remaining = phaseEndsAt - pausedAt = 10min → 顺延 10 分钟
+  assert.equal(s.phaseEndsAt, resumeAt + 10 * 60000);
+});
+
+test('恢复：暂停期间已过期的，顺延完整工作段而不是立刻触发', () => {
+  const r = noGateReminder('eye'); // 20min
+  const s = createInitialState(r, 1_000_000);
+  s.phaseEndsAt = 1_000_000 + 5 * 60000;
+  applyPause(s, 1_000_000 + 60 * 60000, 1_000_000);
+  // 暂停 30 分钟后恢复，原 phaseEndsAt 相对暂停时刻已过期 25 分钟
+  const resumeAt = 1_000_000 + 30 * 60000;
+  resume(r, s, resumeAt);
+  // remaining = max(0, phaseEndsAt - pausedAt) = max(0, 5min - 0) = 5min → 顺延 5 分钟（暂停时刻之后还剩的）
+  // 注：remaining 是相对"进入暂停那一刻"算的，已过期部分自然作废
+  assert.equal(s.phaseEndsAt, resumeAt + 5 * 60000);
 });
 
 test('引擎门面：tick 返回每个提醒的触发判定', () => {

@@ -3,15 +3,15 @@ node_modules/
 
 # ===== 构建产物 =====
 dist/
-src-tauri/target/
-src-tauri/gen/
+rhythm-desktop/src-tauri/target/
+rhythm-desktop/src-tauri/gen/
 *.app
 *.dmg
 *.msi
 *.exe
 
-# ===== Tauri 打包临时资源（图标需自备，不入库） =====
-src-tauri/icons/
+# ===== Tauri 资源（icons 入库：构建必需；gen/ 为生成代码不入库） =====
+# src-tauri/icons/
 
 # ===== 项目内部记忆（非产品代码） =====
 .workbuddy/

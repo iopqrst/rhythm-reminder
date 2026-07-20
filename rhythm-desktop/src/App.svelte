@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { engine, seedIfEmpty, getLocal } from './lib/store';
+  import { bootEngine, getEngine, getLocal } from './lib/store';
   import type { Reminder, RuntimeContext } from './lib/engine/index';
   import { getContextProvider, type ContextProvider, type ContextSample } from './lib/platform/context';
   import { sendSystemNotification } from './lib/platform/notify';
+  import { listen } from '@tauri-apps/api/event';
   import Sidebar from './lib/components/Sidebar.svelte';
   import Home from './lib/components/Home.svelte';
   import NewReminder from './lib/components/NewReminder.svelte';
@@ -21,7 +22,12 @@
   let trayOpen = $state(false);
   let activeBreak = $state<Reminder | null>(null);
   let clock = $state('');
+  let ready = $state(false); // 引擎 boot 完成后才渲染页面，避免 getEngine() 在 boot 前被调用
+  let bootError = $state<string | null>(null); // 启动期错误（可见化，避免静默白屏）
+  let bootSlow = $state(false); // 启动超过 5s 仍未 ready 的提示
   const firing = new Set<string>();
+  const warned = new Set<string>(); // 已发过"预告"的提醒（避免每秒重复通知）
+  const breakQueue: Reminder[] = []; // 待弹出的休息队列（多个提醒同时到点不丢失）
 
   // 系统能力适配层：真实空闲/前台应用/会议信号（Tauri 真机）或 Web 降级
   const provider: ContextProvider = getContextProvider();
@@ -30,7 +36,7 @@
   let ticking = false; // 防止 1s 循环里 async tick 叠加
 
   function refresh() {
-    reminders = engine.list();
+    reminders = getEngine().list();
   }
 
   // 休息动作时长（秒）：用于全屏弹窗倒计时演示
@@ -55,20 +61,33 @@
         weekday: new Date(now).getDay(),
         clock: getLocal(now).clock,
       };
-      const results = engine.tick(ctx);
+      const results = getEngine().tick(ctx);
       const nf: Record<string, number> = {};
       for (const res of results) nf[res.reminderId] = res.nextFireAt;
       nextFires = nf;
       for (const res of results) {
-        if (res.fire && !firing.has(res.reminderId) && !activeBreak) {
+        const r = reminders.find((x) => x.id === res.reminderId);
+        if (!r) continue;
+        // 到点触发：放入队列（避免多个提醒同时到点时，非空 activeBreak 把后续提醒吞掉）
+        if (res.fire && !firing.has(res.reminderId)) {
           firing.add(res.reminderId);
-          const r = reminders.find((x) => x.id === res.reminderId);
-          if (r) {
-            activeBreak = r;
-            // 并发一条真实系统通知：即使用户在别的窗口也能被提醒
-            void sendSystemNotification(r.label, r.message || '该休息一下了');
-          }
+          breakQueue.push(r);
+          // 并发一条真实系统通知：即使用户在别的窗口也能被提醒
+          void sendSystemNotification(r.label, r.message || '该休息一下了');
+        } else if (res.warn && !warned.has(res.reminderId)) {
+          // 休息前预告（preWarn 闸门生效）：提前给用户留出保存/暂停时间
+          warned.add(res.reminderId);
+          void sendSystemNotification(
+            `${r.label} · 即将提醒`,
+            `${Math.ceil((r.gates.warnSeconds || 10))} 秒后开始「${r.label}」`,
+          );
         }
+        // 一旦不再处于 warn 窗口，重置预告标记，下一周期可再次预告
+        if (!res.warn) warned.delete(res.reminderId);
+      }
+      // 弹出队列中的下一个休息（一次一个，处理完自动接下一个）
+      if (!activeBreak && breakQueue.length > 0) {
+        activeBreak = breakQueue.shift() ?? null;
       }
     } finally {
       ticking = false;
@@ -81,34 +100,35 @@
     trayOpen = false;
   }
   function toggleEnabled(id: string, cur: boolean) {
-    engine.setEnabled(id, !cur);
+    getEngine().setEnabled(id, !cur);
     refresh();
   }
   function addReminder(r: Reminder) {
-    engine.add(r);
+    getEngine().add(r);
     refresh();
     go('home');
   }
   function removeReminder(id: string) {
-    engine.remove(id);
+    getEngine().remove(id);
     refresh();
   }
   function toggleGlobalPause() {
     const now = Date.now();
     if (globalPaused) {
-      for (const r of reminders) engine.resumeReminder(r.id);
+      for (const r of reminders) getEngine().resumeReminder(r.id);
       globalPaused = false;
     } else {
-      for (const r of reminders) engine.pause(r.id, now + 86400000 * 365);
+      for (const r of reminders) getEngine().pause(r.id, now + 86400000 * 365);
       globalPaused = true;
     }
     refresh();
   }
   function previewBreak() {
     const r = reminders.find((x) => x.enabled) ?? reminders[0];
-    if (r) {
-      activeBreak = r;
+    if (r && !firing.has(r.id)) {
       firing.add(r.id);
+      breakQueue.push(r);
+      if (!activeBreak) activeBreak = breakQueue.shift() ?? null;
     }
   }
   function closeBreak(id: string) {
@@ -116,16 +136,53 @@
     activeBreak = null;
     refresh();
   }
-  function onDone(id: string) { engine.complete(id); closeBreak(id); }
-  function onSnooze(id: string) { engine.snooze(id, 5); closeBreak(id); }
-  function onSkip(id: string) { engine.skip(id); closeBreak(id); }
+  function onDone(id: string) { getEngine().complete(id); closeBreak(id); }
+  function onSnooze(id: string) { getEngine().snooze(id, 5); closeBreak(id); }
+  function onSkip(id: string) { getEngine().skip(id); closeBreak(id); }
 
   onMount(() => {
-    seedIfEmpty();
-    refresh();
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let unlisten: (() => void) | undefined;
+    let slowTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // 全局错误可见化：任何未捕获 JS 错误 / promise 拒绝都显示出来
+    const onErr = (e: ErrorEvent) => (bootError = `JS 错误：${e.message}`);
+    const onReject = (e: PromiseRejectionEvent) =>
+      (bootError = `未处理的 Promise 拒绝：${e.reason ? String(e.reason) : '未知'}`);
+    window.addEventListener('error', onErr);
+    window.addEventListener('unhandledrejection', onReject);
+
+    bootEngine()
+      .then(() => {
+        refresh();
+        tick();
+        ready = true;
+        timer = setInterval(tick, 1000);
+      })
+      .catch((e) => {
+        bootError = `引擎启动失败：${e?.stack ? e.stack : String(e)}`;
+      });
+    // 5s 仍未 ready 且无错误：提示可能卡在底层（如 WebView2）
+    slowTimer = setTimeout(() => {
+      if (!ready && !bootError) bootSlow = true;
+    }, 5000);
+
+    // 全局快捷键（仅 Tauri 真机有效；Web 预览不注册，避免无谓建立 tauri 通道）
+    if (provider.kind === 'tauri') {
+      listen<string>('global-shortcut', (e) => {
+        if (e.payload === 'toggle-pause') toggleGlobalPause();
+        else if (e.payload === 'skip-break' && activeBreak) onSkip(activeBreak.id);
+      })
+        .then((u) => (unlisten = u))
+        .catch(() => {});
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+      if (slowTimer) clearTimeout(slowTimer);
+      unlisten?.();
+      window.removeEventListener('error', onErr);
+      window.removeEventListener('unhandledrejection', onReject);
+    };
   });
 </script>
 
@@ -138,6 +195,7 @@
     <button class="newbtn" onclick={() => go('new')}>+ 新建提醒</button>
   </div>
 
+  {#if ready}
   <div class="body">
     <Sidebar {view} {globalPaused} {go} {toggleGlobalPause} />
     <div class="main">
@@ -159,5 +217,23 @@
 
   {#if activeBreak}
     <BreakOverlay reminder={activeBreak} seconds={breakSeconds(activeBreak)} onDone={() => onDone(activeBreak!.id)} onSnooze={() => onSnooze(activeBreak!.id)} onSkip={() => onSkip(activeBreak!.id)} />
+  {/if}
+  {:else}
+    {#if bootError}
+      <div style="padding:24px;color:#c0392b;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;">
+        <strong style="font-size:15px;">⚠️ 启动失败</strong><br />{bootError}
+      </div>
+    {:else}
+      <div class="boot">
+        正在启动节奏 Rhythm…
+        {#if bootSlow}
+          <div style="margin-top:10px;color:#888;font-size:12px;max-width:440px;line-height:1.6;">
+            启动较慢：若长时间无响应，多半是 Windows 缺少 <b>WebView2 运行库</b>。
+            请安装 Microsoft Edge WebView2 Runtime（Evergreen 版）后重试，下载：
+            https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/
+          </div>
+        {/if}
+      </div>
+    {/if}
   {/if}
 </div>

@@ -1,6 +1,20 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::panic;
 use serde::Serialize;
+use tauri::Emitter;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+use windows::core::PCWSTR;
+use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+/// 用原生消息框把致命错误暴露给用户（避免静默白屏/无窗口，便于排查）。
+fn show_error(title: &str, msg: &str) {
+    let t: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+    let m: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let _ = MessageBoxW(None, PCWSTR(m.as_ptr()), PCWSTR(t.as_ptr()), MB_OK | MB_ICONERROR);
+    }
+}
 
 /// 喂给前端引擎的系统信号 DTO（与 src/lib/platform/context.ts 的 RustContextDto 对齐，snake_case）。
 #[derive(Serialize, Default)]
@@ -101,6 +115,14 @@ fn foreground_app() -> Option<String> {
 }
 
 fn main() {
+    // 启动期任何 panic/错误都弹原生消息框，避免静默无窗口（便于排查 WebView2 等依赖问题）
+    panic::set_hook(Box::new(|info| {
+        show_error("节奏 Rhythm 启动失败", &info.to_string());
+    }));
+
+    // 全局快捷键（Windows/Linux: Ctrl+Shift；macOS 上同键位可用）
+    // - Ctrl+Shift+R：全局暂停 / 恢复所有提醒
+    // - Ctrl+Shift+S：跳过当前正在进行的休息
     tauri::Builder::default()
         // 系统能力适配层：托盘/菜单栏、通知、自启动、全局快捷键、SQLite
         .plugin(tauri_plugin_positioner::init())
@@ -109,11 +131,39 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, _event| {
+                    let toggle_pause =
+                        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR);
+                    let skip_break =
+                        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS);
+                    if shortcut == &toggle_pause {
+                        let _ = app.emit("global-shortcut", "toggle-pause");
+                    } else if shortcut == &skip_break {
+                        let _ = app.emit("global-shortcut", "skip-break");
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_sql::Builder::default().build())
+        // 注册全局快捷键（setup 中注册，确保插件已就绪）
+        .setup(|app| {
+            let handle = app.handle();
+            handle
+                .global_shortcut()
+                .register(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyR))?;
+            handle
+                .global_shortcut()
+                .register(Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyS))?;
+            Ok(())
+        })
         // 间隔引擎核心（rhythm-core）是纯 TS，运行在前端；
         // 系统信号通过 collect_context 命令喂给前端，前端合并成 RuntimeContext 后交给引擎。
         .invoke_handler(tauri::generate_handler![collect_context])
         .run(tauri::generate_context!())
-        .expect("error while running 节奏 Rhythm");
+        .unwrap_or_else(|e| {
+            show_error("节奏 Rhythm 启动失败", &format!("{e}"));
+            std::process::exit(1);
+        });
 }

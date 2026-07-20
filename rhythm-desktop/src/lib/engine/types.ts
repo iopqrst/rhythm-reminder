@@ -46,6 +46,14 @@ export interface WorkWindow {
 /** 提醒的运行模式 */
 export type ReminderMode = 'single' | 'pomodoro';
 
+/** 休息段长度配置（仅 pomodoro 用） */
+export interface BreakPlan {
+  /** 短休息（分钟） */
+  shortMin: number;
+  /** 长休息（分钟）；每 longEvery 个短周期后进入 */
+  longMin: number;
+}
+
 /** 一个提醒的完整定义（持久化对象） */
 export interface Reminder {
   id: string;
@@ -61,6 +69,8 @@ export interface Reminder {
   breakMin: number;
   /** pomodoro 模式：长休息前需完成的短周期数 */
   longEvery: number;
+  /** pomodoro 模式：长休息时长（分钟）。缺省时回落为 breakMin*3（向后兼容旧数据） */
+  longBreakMin?: number;
   sound: SoundName;
   enabled: boolean;
   workWindow: WorkWindow;
@@ -73,7 +83,7 @@ export interface Reminder {
 export type Phase = 'working' | 'breaking' | 'paused';
 
 /**
- * 运行时状态（不持久化，或仅持久化少量字段用于跨会话恢复）。
+ * 运行时状态（可持久化，用于跨会话恢复）。
  * 引擎的所有调度计算都基于这个状态 + 外部 RuntimeContext。
  */
 export interface ReminderState {
@@ -83,6 +93,8 @@ export interface ReminderState {
   phaseEndsAt: number;
   /** 用户手动全局暂停的截止时间；undefined 表示未暂停 */
   pausedUntil?: number;
+  /** 进入暂停的时刻（epoch ms），用于恢复时按"剩余时长"顺延 */
+  pausedAt?: number;
   /** 单次延后的截止时间（仅影响下一次）；undefined 表示无延后 */
   snoozedUntil?: number;
   /** pomodoro：已完成短周期计数 */

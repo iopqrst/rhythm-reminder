@@ -22,10 +22,17 @@ function dayAllowed(r: Reminder, weekday: number): boolean {
 export function evaluateGates(r: Reminder, ctx: RuntimeContext): { blocked: boolean; reason?: string } {
   const g: GateConfig = r.gates;
   if (g.meetingPause && ctx.inMeeting) return { blocked: true, reason: 'meeting' };
-  if (g.idlePause && ctx.isIdle && ctx.idleSeconds >= g.idleMinutes * 60)
-    return { blocked: true, reason: 'idle' };
-  if (g.appWhitelist.length > 0 && ctx.activeApp && g.appWhitelist.includes(ctx.activeApp))
-    return { blocked: true, reason: 'whitelist' };
+  // 适配层已经把"空闲 >= 阈值"折算进 isIdle，这里只需直接采用（避免重复二次判阈）
+  if (g.idlePause && ctx.isIdle) return { blocked: true, reason: 'idle' };
+  if (g.appWhitelist.length > 0 && ctx.activeApp) {
+    const app = ctx.activeApp.toLowerCase();
+    // 白名单条目按"包含"模糊匹配（不区分大小写），命中即免打扰
+    const hit = g.appWhitelist.some((w) => {
+      const k = w.trim().toLowerCase();
+      return k.length > 0 && app.includes(k);
+    });
+    if (hit) return { blocked: true, reason: 'whitelist' };
+  }
   return { blocked: false };
 }
 
@@ -98,8 +105,10 @@ export function applyComplete(r: Reminder, s: ReminderState, now: number): void 
   s.snoozedUntil = undefined;
   if (r.mode === 'pomodoro') {
     s.pomodoroCount += 1;
-    const isLong = s.pomodoroCount % r.longEvery === 0;
-    const breakMs = (isLong ? r.breakMin * 3 : r.breakMin) * 60000;
+    const isLong = r.longEvery > 0 && s.pomodoroCount % r.longEvery === 0;
+    // 长休用独立的 longBreakMin；旧数据缺省回落为 breakMin*3，保证语义可配置且兼容
+    const longMin = r.longBreakMin ?? r.breakMin * 3;
+    const breakMs = (isLong ? longMin : r.breakMin) * 60000;
     s.phase = 'breaking';
     s.phaseEndsAt = now + breakMs;
   } else {
@@ -120,18 +129,25 @@ export function applySkip(r: Reminder, s: ReminderState, now: number): void {
   s.phaseEndsAt = now + workSegmentMs(r);
 }
 
-/** 暂停到 untilMs（全局暂停 / 会议暂停常用） */
-export function applyPause(s: ReminderState, untilMs: number): void {
+/** 暂停到 untilMs（全局暂停 / 会议暂停常用）。nowMs 为进入暂停的当前时刻。 */
+export function applyPause(s: ReminderState, untilMs: number, nowMs: number): void {
   s.pausedUntil = untilMs;
+  s.pausedAt = nowMs;
   s.phase = 'paused';
 }
 
-/** 恢复：清除暂停，回到 working 阶段 */
-export function resume(s: ReminderState, now: number): void {
+/** 恢复：清除暂停，回到 working 阶段。
+ *  语义：暂停 = 冻结剩余时间。剩余时长 = phaseEndsAt - 暂停时刻；用其顺延，避免恢复后立刻误触发。
+ *  注意：需要知道"暂停发生在何时"，故用 pausedUntil 之前必须先记录 pausedAt。
+ */
+export function resume(r: Reminder, s: ReminderState, now: number): void {
+  const pausedAt = s.pausedAt ?? now;
+  const remaining = Math.max(0, s.phaseEndsAt - pausedAt);
   s.pausedUntil = undefined;
+  s.pausedAt = undefined;
   s.phase = 'working';
-  // 若暂停期间原定触发已过期，顺延一个工作段
-  if (s.phaseEndsAt <= now) s.phaseEndsAt = now + 60000;
+  // 用暂停前的剩余时长顺延；若已过期则给一个完整工作段，绝不"立刻触发"
+  s.phaseEndsAt = now + (remaining > 0 ? remaining : workSegmentMs(r));
 }
 
 /** 新建提醒时构造初始状态 */

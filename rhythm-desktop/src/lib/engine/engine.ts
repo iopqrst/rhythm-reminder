@@ -81,29 +81,48 @@ export class RhythmEngine {
     this.store.save(r);
   }
 
+  /** 状态写回持久层（fire-and-forget），保证暂停/延后/完成跨会话不丢 */
+  private persist(id: string): void {
+    const s = this.states.get(id);
+    if (s) this.store.saveState?.(id, s);
+  }
+
   pause(id: string, untilMs: number): void {
     const s = this.states.get(id);
-    if (s) applyPause(s, untilMs);
+    if (s) {
+      applyPause(s, untilMs, this.nowFn());
+      this.persist(id);
+    }
   }
   resumeReminder(id: string): void {
+    const r = this.reminders.get(id);
     const s = this.states.get(id);
-    if (s) resume(s, this.nowFn());
+    if (r && s) {
+      resume(r, s, this.nowFn());
+      this.persist(id);
+    }
   }
   snooze(id: string, minutes: number): void {
     const s = this.states.get(id);
-    if (s) applySnooze(s, minutes, this.nowFn());
+    if (s) {
+      applySnooze(s, minutes, this.nowFn());
+      this.persist(id);
+    }
   }
   skip(id: string): void {
     const r = this.reminders.get(id);
     const s = this.states.get(id);
-    if (r && s) applySkip(r, s, this.nowFn());
+    if (r && s) {
+      applySkip(r, s, this.nowFn());
+      this.persist(id);
+    }
   }
   complete(id: string): void {
     const r = this.reminders.get(id);
     const s = this.states.get(id);
     if (r && s) {
       applyComplete(r, s, this.nowFn());
-      this.store.saveState?.(id, s);
+      this.persist(id);
     }
   }
 
