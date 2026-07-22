@@ -40,28 +40,102 @@
   const maxDaily = $derived(Math.max(1, ...daily));
   const enabledCount = $derived(reminders.filter((r) => r.enabled).length);
 
-  // 今日"预计应触发次数"：按各启用提醒已过去的工作时段 / 间隔估算（而非简单用启用数）。
-  // 公式：max(0, floor((当前时刻 - 今日工作窗起点) / 间隔分钟))，逐一求和。
+  // 今日"预计应触发次数"：按各启用提醒已过去的工作时段 / 间隔估算。
+  // 考虑工作时间窗 + 勿扰时段，更贴近实际应提醒次数。
   function expectedToday(): number {
     const now = Date.now();
+    const { weekday, clock } = getLocal(now);
+    const curMin = clockToMinutes(clock);
     let total = 0;
     for (const r of reminders) {
       if (!r.enabled) continue;
-      const startMs = dayStart(0);
-      let from = startMs;
-      if (r.workWindow.enabled) {
-        const sMin = clockToMinutes(r.workWindow.start);
-        const base0 = new Date();
-        base0.setHours(0, 0, 0, 0);
-        const ws = base0.getTime() + sMin * 60000;
-        if (now < ws) continue; // 今天工作窗还没开始
-        from = Math.max(from, ws);
-      }
       const interval = r.mode === 'pomodoro' ? r.workMin : r.intervalMin;
-      total += Math.max(0, Math.floor((now - from) / 60000 / interval));
+      if (r.workWindow.enabled) {
+        // 今天工作窗还没开始 → 0
+        const ws = clockToMinutes(r.workWindow.start);
+        const we = clockToMinutes(r.workWindow.end);
+        if (curMin < ws) continue;
+        // 有效工作分钟数 = 今天已过去的工作窗部分 - 勿扰时段扣除
+        const effectiveEnd = Math.min(curMin, we);
+        let workMin = Math.max(0, effectiveEnd - ws);
+        // 扣除勿扰时段中重叠的部分
+        for (const q of r.quietWindows ?? []) {
+          if (!q.enabled) continue;
+          if (q.days && q.days.length > 0 && !q.days.includes(weekday)) continue;
+          const qs = clockToMinutes(q.start);
+          const qe = clockToMinutes(q.end);
+          if (qe <= ws || qs >= effectiveEnd) continue;
+          const overlapStart = Math.max(ws, qs);
+          const overlapEnd = Math.min(effectiveEnd, qe);
+          workMin -= Math.max(0, overlapEnd - overlapStart);
+        }
+        total += Math.max(0, Math.floor(workMin / interval));
+      } else {
+        // 无工作窗限制：全天计算，但扣除勿扰时段
+        let allMin = curMin;
+        for (const q of r.quietWindows ?? []) {
+          if (!q.enabled) continue;
+          if (q.days && q.days.length > 0 && !q.days.includes(weekday)) continue;
+          const qs = clockToMinutes(q.start);
+          const qe = clockToMinutes(q.end);
+          if (qe <= 0 || qs >= curMin) continue;
+          const overlapStart = Math.max(0, qs);
+          const overlapEnd = Math.min(curMin, qe);
+          allMin -= Math.max(0, overlapEnd - overlapStart);
+        }
+        total += Math.max(0, Math.floor(allMin / interval));
+      }
     }
     return total;
   }
+
+  // 未来 2 小时内预计触发次数
+  function expectedNext2H(): number {
+    const now = Date.now();
+    const { weekday, clock } = getLocal(now);
+    const curMin = clockToMinutes(clock);
+    const endMin = curMin + 120;
+    let total = 0;
+    for (const r of reminders) {
+      if (!r.enabled) continue;
+      const interval = r.mode === 'pomodoro' ? r.workMin : r.intervalMin;
+      // 检查不在勿扰时段
+      let inQuiet = false;
+      for (const q of r.quietWindows ?? []) {
+        if (!q.enabled) continue;
+        if (q.days && q.days.length > 0 && !q.days.includes(weekday)) continue;
+        const qs = clockToMinutes(q.start);
+        const qe = clockToMinutes(q.end);
+        if (curMin < qe && endMin > qs) { inQuiet = true; break; }
+      }
+      if (inQuiet) continue;
+      // 检查工作窗
+      if (r.workWindow.enabled) {
+        const ws = clockToMinutes(r.workWindow.start);
+        const we = clockToMinutes(r.workWindow.end);
+        if (curMin >= we) continue; // 已过工作窗
+        const effectiveEnd = Math.min(endMin, we);
+        if (effectiveEnd <= Math.max(curMin, ws)) continue;
+        const effectiveMin = effectiveEnd - Math.max(curMin, ws);
+        total += Math.max(0, Math.floor(effectiveMin / interval));
+      } else {
+        total += Math.max(0, Math.floor(120 / interval));
+      }
+    }
+    return total;
+  }
+
+  // 按提醒统计今日完成次数
+  const perReminder = $derived.by(() => {
+    const now = Date.now();
+    const today0 = dayStart(0);
+    return reminders.map((r) => {
+      const state = getEngine().getState(r.id);
+      const todayCompleted = state?.lastTriggeredAt && state.lastTriggeredAt >= today0 ? 1 : 0;
+      const interval = r.mode === 'pomodoro' ? r.workMin : r.intervalMin;
+      return { id: r.id, label: r.label, kind: r.kind, todayCompleted, interval, enabled: r.enabled };
+    });
+  });
 
   // 完成率：今日完成 / 今日预计应触发（更贴近真实达成度）
   const completion = $derived.by(() => {
@@ -69,6 +143,10 @@
     if (exp <= 0) return todayDone > 0 ? 100 : 0;
     return Math.min(100, Math.round((todayDone / exp) * 100));
   });
+
+  const next2H = $derived(expectedNext2H());
+  const emoji = (k: string) =>
+    k === 'eye' ? '👁️' : k === 'water' ? '💧' : k === 'stand' ? '🧍' : k === 'stretch' ? '🤸' : k === 'medication' ? '💊' : k === 'pomodoro' ? '🍅' : '✏️';
 </script>
 
 <div class="greet">
@@ -95,4 +173,17 @@
 
 <div class="muted" style="font-size:12px;padding:0 4px;">
   今天已完成 {todayDone} 次 · 预计应触发 {expectedToday()} 次 · 生效提醒 {enabledCount} 个
+  {#if next2H > 0}<br />⏱ 未来 2 小时预计触发 {next2H} 次{/if}
+</div>
+
+<div class="sectiontitle" style="margin-top:18px;">按提醒明细</div>
+<div class="card">
+  {#each perReminder as pr (pr.id)}
+    <div class="setrow">
+      <div>
+        <div class="t">{emoji(pr.kind)} {pr.label}</div>
+        <div class="d">{pr.enabled ? `每 ${pr.interval} 分钟 · 今日完成 ${pr.todayCompleted} 次` : '已关闭'}</div>
+      </div>
+    </div>
+  {/each}
 </div>

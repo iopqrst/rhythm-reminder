@@ -200,7 +200,7 @@
     <Sidebar {view} {globalPaused} {go} {toggleGlobalPause} />
     <div class="main">
       {#if view === 'home'}
-        <Home {reminders} {nextFires} {clock} {globalPaused} {toggleEnabled} {previewBreak} />
+        <Home {reminders} {nextFires} {clock} {globalPaused} {toggleEnabled} {removeReminder} {previewBreak} />
       {:else if view === 'stats'}
         <Stats {reminders} />
       {:else if view === 'settings'}

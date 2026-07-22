@@ -1,0 +1,57 @@
+name: Build macOS
+
+# 触发：推到 main 自动跑；也可在 Actions 页面手动触发（workflow_dispatch）
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust (含 x86_64 + aarch64 双 target 以打通用二进制)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Install frontend dependencies
+        working-directory: rhythm-desktop
+        run: npm install
+
+      # 未配置 Apple 开发者证书时，Tauri 会跳过签名，
+      # 产出「未签名」的 .app / .dmg（可本地双击运行，便于自测）。
+      # 若要对外分发并消除 Gatekeeper 拦截，需在此配置以下 secrets：
+      #   APPLE_CERTIFICATE        (p12 证书 base64)
+      #   APPLE_CERTIFICATE_PASSWORD
+      #   APPLE_SIGNING_IDENTITY   (如 "Developer ID Application: xxx")
+      #   APPLE_ID                 (Apple ID 邮箱)
+      #   APPLE_PASSWORD           (app-specific password)
+      #   APPLE_TEAM_ID
+      - name: Build Tauri app for macOS (unsigned, universal)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          CI: true
+        with:
+          projectPath: rhythm-desktop
+          args: --target universal-apple-darwin
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhythm-macos-universal
+          path: |
+            rhythm-desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            rhythm-desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
+          if-no-files-found: warn

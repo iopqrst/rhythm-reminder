@@ -103,7 +103,10 @@ export class RhythmEngine {
     }
   }
   snooze(id: string, minutes: number): void {
+    const r = this.reminders.get(id);
     const s = this.states.get(id);
+    // 严格模式禁止延后：UI 已隐藏按钮，此处兜底防止程序化绕行
+    if (r && r.gates.strictMode) return;
     if (s) {
       applySnooze(s, minutes, this.nowFn());
       this.persist(id);
@@ -112,10 +115,11 @@ export class RhythmEngine {
   skip(id: string): void {
     const r = this.reminders.get(id);
     const s = this.states.get(id);
-    if (r && s) {
-      applySkip(r, s, this.nowFn());
-      this.persist(id);
-    }
+    if (!r || !s) return;
+    // 严格模式禁止跳过：UI 已隐藏按钮，此处兜底防止程序化绕行
+    if (r.gates.strictMode) return;
+    applySkip(r, s, this.nowFn());
+    this.persist(id);
   }
   complete(id: string): void {
     const r = this.reminders.get(id);

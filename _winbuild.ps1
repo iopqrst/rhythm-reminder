@@ -4,14 +4,15 @@
 # 用法（在 PowerShell 中）：
 #   .\_winbuild.ps1            # 等价 cargo build（debug）
 #   .\_winbuild.ps1 -Release   # cargo build --release
+#   .\_winbuild.ps1 -NoBundle  # npm run tauri build -- --no-bundle --debug（前端打包 + 原生编译，不出安装包；用于把新前端打进 exe）
 #   .\_winbuild.ps1 -Bundle    # npm run tauri build（前端打包 + 原生编译 + 安装包；需 WiX/NSIS + WebView2）
-param([switch]$Release, [switch]$Bundle)
+param([switch]$Release, [switch]$NoBundle, [switch]$Bundle)
 
 $ErrorActionPreference = 'Stop'
 
 # 1) 用 vswhere 定位 VS 安装（不依赖 cmd）
 $vswhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
-$install = & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format value -property installationPath | Select-Object -First 1
+$install = & $vswhere -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format value -property installationPath | Select-Object -First 1
 if (-not $install) { Write-Error "未找到 Visual Studio VC.Tools  workload"; exit 1 }
 
 # 2) 解析 VCTools 版本与 Windows SDK 版本
@@ -47,6 +48,9 @@ Set-Location (Join-Path $PSScriptRoot "rhythm-desktop\src-tauri")
 if ($Bundle) {
     Write-Host "[winbuild] running: npm run tauri build"
     npm run tauri build 2>&1
+} elseif ($NoBundle) {
+    Write-Host "[winbuild] running: npm run tauri build -- --no-bundle --debug"
+    npm run tauri build -- --no-bundle --debug 2>&1
 } else {
     $target = if ($Release) { "--release" } else { "" }
     Write-Host "[winbuild] running: cargo build $target"
