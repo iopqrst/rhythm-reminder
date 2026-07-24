@@ -4,16 +4,42 @@ use std::panic;
 use serde::Serialize;
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+#[cfg(target_os = "windows")]
 use windows::core::PCWSTR;
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
 
 /// 用原生消息框把致命错误暴露给用户（避免静默白屏/无窗口，便于排查）。
+#[cfg(target_os = "windows")]
 fn show_error(title: &str, msg: &str) {
     let t: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
     let m: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         let _ = MessageBoxW(None, PCWSTR(m.as_ptr()), PCWSTR(t.as_ptr()), MB_OK | MB_ICONERROR);
     }
+}
+
+/// macOS：用 osascript 弹原生错误对话框（无需额外依赖），同时输出到 stderr。
+#[cfg(target_os = "macos")]
+fn show_error(title: &str, msg: &str) {
+    eprintln!("{title}: {msg}");
+    // AppleScript 字符串字面量：转义反斜杠与双引号
+    let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        "display dialog \"{}\" with title \"{}\" buttons {{\"OK\"}} default button \"OK\" with icon stop",
+        esc(msg),
+        esc(title)
+    );
+    let _ = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .status();
+}
+
+/// 其他平台（Linux 等）：降级为 stderr 输出。
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn show_error(title: &str, msg: &str) {
+    eprintln!("{title}: {msg}");
 }
 
 /// 喂给前端引擎的系统信号 DTO（与 src/lib/platform/context.ts 的 RustContextDto 对齐，snake_case）。
