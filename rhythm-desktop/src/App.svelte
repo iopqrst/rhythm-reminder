@@ -10,10 +10,11 @@
   import NewReminder from './lib/components/NewReminder.svelte';
   import Stats from './lib/components/Stats.svelte';
   import Settings from './lib/components/Settings.svelte';
+  import Achievements from './lib/components/Achievements.svelte';
   import BreakOverlay from './lib/components/BreakOverlay.svelte';
   import TrayPopover from './lib/components/TrayPopover.svelte';
 
-  type View = 'home' | 'stats' | 'settings' | 'new';
+  type View = 'home' | 'stats' | 'achievements' | 'settings' | 'new';
 
   let view = $state<View>('home');
   let reminders = $state<Reminder[]>([]);
@@ -203,6 +204,8 @@
         <Home {reminders} {nextFires} {clock} {globalPaused} {toggleEnabled} {removeReminder} {previewBreak} />
       {:else if view === 'stats'}
         <Stats {reminders} />
+      {:else if view === 'achievements'}
+        <Achievements />
       {:else if view === 'settings'}
         <Settings {reminders} />
       {:else if view === 'new'}

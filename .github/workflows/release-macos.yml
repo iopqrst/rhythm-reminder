@@ -21,10 +21,10 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup Rust (含 x86_64 + aarch64 双 target 以打通用二进制)
+      - name: Setup Rust (aarch64 = Apple Silicon, GitHub macos-latest 本机架构)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - name: Install frontend dependencies
         working-directory: rhythm-desktop
@@ -39,19 +39,24 @@ jobs:
       #   APPLE_ID                 (Apple ID 邮箱)
       #   APPLE_PASSWORD           (app-specific password)
       #   APPLE_TEAM_ID
-      - name: Build Tauri app for macOS (unsigned, universal)
+      # 说明：不直接打 universal-apple-darwin，因为 GitHub 的 macos-latest
+      # 是 ARM 机器，交叉编译 x86_64 极易触发 ld 找不到系统框架而失败。
+      # 改为打本机架构 aarch64（Apple Silicon，覆盖绝大多数现代 Mac），稳定可靠。
+      # 如需 Intel 版，后续可新增一个 x86_64-apple-darwin 的 job。
+      - name: Build Tauri app for macOS (unsigned, Apple Silicon)
         uses: tauri-apps/tauri-action@v0
         env:
           CI: true
+          MACOSX_DEPLOYMENT_TARGET: '10.15'
         with:
           projectPath: rhythm-desktop
-          args: --target universal-apple-darwin
+          args: --target aarch64-apple-darwin
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rhythm-macos-universal
+          name: rhythm-macos-apple-silicon
           path: |
-            rhythm-desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            rhythm-desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
+            rhythm-desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            rhythm-desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
           if-no-files-found: warn

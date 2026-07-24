@@ -3,6 +3,7 @@
   const navs = [
     { id: 'home', label: '首页', icon: '🏠' },
     { id: 'stats', label: '统计', icon: '📊' },
+    { id: 'achievements', label: '成就', icon: '🏆' },
     { id: 'settings', label: '设置', icon: '⚙️' },
   ];
 </script>

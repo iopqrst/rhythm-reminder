@@ -4,6 +4,8 @@
 // 仍然零平台依赖：时间本地化走注入的 getLocal，运行时上下文由系统适配层采集后传入。
 
 import type { Reminder, ReminderState, RuntimeContext } from './types';
+import type { CompletionEvent, AchievementSummary } from './achievements';
+import { computeAchievements } from './achievements';
 import type { GetLocal } from './scheduler';
 import {
   createInitialState,
@@ -23,6 +25,9 @@ export interface ReminderStore {
   remove(id: string): void;
   loadState?(id: string): ReminderState | undefined;
   saveState?(id: string, s: ReminderState): void;
+  /** 完成日志：用于成就/连续打卡统计（可选，缺省时成就数据为空） */
+  loadCompletions?(): CompletionEvent[];
+  recordCompletion?(e: CompletionEvent): void;
 }
 
 export interface TickResult {
@@ -36,6 +41,7 @@ export interface TickResult {
 export class RhythmEngine {
   private reminders = new Map<string, Reminder>();
   private states = new Map<string, ReminderState>();
+  private completions: CompletionEvent[] = [];
   private getLocal: GetLocal;
 
   constructor(
@@ -49,6 +55,7 @@ export class RhythmEngine {
       const st = store.loadState?.(r.id) ?? createInitialState(r, this.nowFn());
       this.states.set(r.id, st);
     }
+    this.completions = store.loadCompletions?.() ?? [];
   }
 
   list(): Reminder[] {
@@ -125,9 +132,19 @@ export class RhythmEngine {
     const r = this.reminders.get(id);
     const s = this.states.get(id);
     if (r && s) {
-      applyComplete(r, s, this.nowFn());
+      const now = this.nowFn();
+      applyComplete(r, s, now);
       this.persist(id);
+      // 记录完成事件，用于成就/连续打卡统计
+      const ev: CompletionEvent = { reminderId: id, kind: r.kind, at: now };
+      this.completions.push(ev);
+      this.store.recordCompletion?.(ev);
     }
+  }
+
+  /** 成就与连续打卡统计快照 */
+  getAchievements(now: number = this.nowFn()): AchievementSummary {
+    return computeAchievements(this.completions, now);
   }
 
   /**

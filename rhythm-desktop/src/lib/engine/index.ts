@@ -5,5 +5,6 @@ export * from './types';
 export * from './time';
 export * from './scheduler';
 export * from './engine';
+export * from './achievements';
 export * from './presets';
 export * from './store';

@@ -122,6 +122,24 @@ button { font-family: inherit; }
 .badges { display: flex; gap: 10px; flex-wrap: wrap; } .badge { width: 58px; height: 58px; border-radius: 16px; background: var(--primary-soft); display: flex; align-items: center; justify-content: center; font-size: 26px; }
 .badge.off { filter: grayscale(1); opacity: .4; }
 
+/* 成就页 */
+.hero { display: flex; align-items: center; gap: 16px; padding: 18px 20px; background: linear-gradient(135deg, var(--primary-soft), #fff); border-radius: 16px; margin-bottom: 14px; }
+.hero .flame { font-size: 38px; }
+.hero .n { font-size: 36px; font-weight: 800; line-height: 1; }
+.hero .lbl { font-size: 12px; color: var(--sub); }
+.hero .sub2 { margin-left: auto; text-align: right; }
+.hero .sub2 .n2 { font-size: 24px; font-weight: 800; color: var(--primary); }
+.ach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.ach { display: flex; gap: 12px; align-items: center; padding: 14px; background: var(--panel); border-radius: 14px; box-shadow: var(--shadow); }
+.ach .ico { width: 48px; height: 48px; border-radius: 14px; background: var(--primary-soft); display: flex; align-items: center; justify-content: center; font-size: 24px; flex: none; }
+.ach.off { opacity: .6; }
+.ach.off .ico { filter: grayscale(1); background: #eef1f4; }
+.ach .meta { min-width: 0; }
+.ach .meta .t { font-weight: 600; font-size: 14px; }
+.ach .meta .d { font-size: 12px; color: var(--sub); margin-top: 2px; }
+.prog { height: 6px; border-radius: 999px; background: #e9edf2; margin-top: 8px; overflow: hidden; }
+.prog > i { display: block; height: 100%; background: var(--primary); border-radius: 999px; transition: width .4s ease; }
+
 /* 设置 */
 .setrow { display: flex; align-items: center; justify-content: space-between; padding: 15px 4px; border-bottom: 1px solid var(--line); }
 .setrow:last-child { border-bottom: none; }

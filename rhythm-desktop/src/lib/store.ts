@@ -10,7 +10,7 @@
 //   所以用 bootEngine() 异步初始化 store 后再 new RhythmEngine（boot 模式）。
 
 import { RhythmEngine, type ReminderStore, type Reminder, type ReminderState } from './engine/index';
-import { createReminderFromTemplate, type ReminderKind } from './engine/index';
+import { createReminderFromTemplate, type ReminderKind, type CompletionEvent } from './engine/index';
 
 /** 本地时区 -> {clock, weekday}，与引擎内部本地计算一致 */
 export const getLocal = (ms: number) => ({
@@ -27,6 +27,7 @@ const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 class SqlStore implements ReminderStore {
   private rm = new Map<string, Reminder>();
   private st = new Map<string, ReminderState>();
+  private completions: CompletionEvent[] = [];
   private db: any = null;
 
   async init(): Promise<void> {
@@ -53,6 +54,17 @@ class SqlStore implements ReminderStore {
         for (const row of srows) {
           this.st.set(row.id, JSON.parse(row.data) as ReminderState);
         }
+        // 完成日志（成就/连续打卡）：存于 meta 表，key='completions'
+        await this.db.execute(
+          'CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, data TEXT)',
+        );
+        const mrows = (await this.db.select(
+          'SELECT data FROM meta WHERE key = ?',
+          ['completions'],
+        )) as { data: string }[];
+        if (mrows.length > 0) {
+          this.completions = JSON.parse(mrows[0].data) as CompletionEvent[];
+        }
         return;
       } catch (e) {
         // SQLite 不可用（如权限/路径问题）时安全降级，不阻断应用
@@ -71,6 +83,8 @@ class SqlStore implements ReminderStore {
         const m = JSON.parse(sraw) as Record<string, ReminderState>;
         for (const k in m) this.st.set(k, m[k]);
       }
+      const craw = localStorage.getItem('rhythm.completions');
+      if (craw) this.completions = JSON.parse(craw) as CompletionEvent[];
     } catch {
       /* localStorage 不可用时忽略 */
     }
@@ -122,6 +136,27 @@ class SqlStore implements ReminderStore {
           JSON.stringify(s),
         ])
         .catch(() => {});
+    }
+  }
+  loadCompletions(): CompletionEvent[] {
+    return [...this.completions];
+  }
+  recordCompletion(e: CompletionEvent): void {
+    this.completions.push(e);
+    const json = JSON.stringify(this.completions);
+    if (this.db) {
+      this.db
+        .execute('INSERT OR REPLACE INTO meta (key, data) VALUES (?, ?)', [
+          'completions',
+          json,
+        ])
+        .catch(() => {});
+    } else {
+      try {
+        localStorage.setItem('rhythm.completions', json);
+      } catch {
+        /* 忽略 */
+      }
     }
   }
 }

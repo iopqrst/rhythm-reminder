@@ -4,10 +4,12 @@
 
 import type { Reminder, ReminderState } from './types';
 import type { ReminderStore } from './engine';
+import type { CompletionEvent } from './achievements';
 
 export class MemStore implements ReminderStore {
   private map = new Map<string, Reminder>();
   private states = new Map<string, ReminderState>();
+  private completions: CompletionEvent[] = [];
 
   loadAll(): Reminder[] {
     return [...this.map.values()];
@@ -23,5 +25,11 @@ export class MemStore implements ReminderStore {
   }
   saveState(id: string, s: ReminderState): void {
     this.states.set(id, s);
+  }
+  loadCompletions(): CompletionEvent[] {
+    return [...this.completions];
+  }
+  recordCompletion(e: CompletionEvent): void {
+    this.completions.push(e);
   }
 }
