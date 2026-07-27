@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getEngine } from '../store';
-  import type { Reminder } from '../engine/index';
+  import type { Reminder, SoundName } from '../engine/index';
   interface Props { reminders: Reminder[]; }
   let { reminders }: Props = $props();
 
@@ -62,6 +62,35 @@
       mutate(r);
       getEngine().update(r);
     }
+  }
+
+  // ---- 按单提醒属性（仅在 single 模式下编辑）----
+  const sounds: SoundName[] = ['bell', 'wave', 'wood', 'silent'];
+  const curReminder = $derived(targetReminders[0]);
+  const curSound = $derived(curReminder?.sound ?? 'bell');
+  const curMessage = $derived(curReminder?.message ?? '');
+  const curInterval = $derived(curReminder?.intervalMin ?? 20);
+  const curWorkMin = $derived(curReminder?.workMin ?? 25);
+  const curBreakMin = $derived(curReminder?.breakMin ?? 5);
+  const isPomodoro = $derived(curReminder?.mode === 'pomodoro');
+
+  function updateSound(s: SoundName) {
+    applyAll((r) => (r.sound = s));
+  }
+  function updateMessage(v: string) {
+    applyAll((r) => (r.message = v));
+  }
+  function stepInterval(d: number) {
+    applyAll((r) => (r.intervalMin = Math.max(1, Math.min(1440, r.intervalMin + d))));
+  }
+  function setIntervalVal(v: number) {
+    applyAll((r) => (r.intervalMin = v));
+  }
+  function stepPomodoroWork(d: number) {
+    applyAll((r) => (r.workMin = Math.max(1, Math.min(120, r.workMin + d))));
+  }
+  function stepPomodoroBreak(d: number) {
+    applyAll((r) => (r.breakMin = Math.max(1, Math.min(60, r.breakMin + d))));
   }
 
   // 工作时间窗
@@ -209,6 +238,53 @@
     {/if}
   {/if}
 </div>
+
+{#if configMode === 'single' && selectedId && curReminder}
+<div class="sectiontitle">提醒属性 · {selectedLabel}</div>
+<div class="card">
+  {#if isPomodoro}
+    <div style="font-weight:600;margin-bottom:4px;">专注时长</div>
+    <div class="stepper">
+      <button class="btnround" onclick={() => stepPomodoroWork(-5)}>−</button>
+      <div class="val">{curWorkMin}<small> 分钟</small></div>
+      <button class="btnround" onclick={() => stepPomodoroWork(5)}>+</button>
+    </div>
+    <div style="font-weight:600;margin-bottom:4px;margin-top:14px;">休息时长</div>
+    <div class="stepper">
+      <button class="btnround" onclick={() => stepPomodoroBreak(-1)}>−</button>
+      <div class="val">{curBreakMin}<small> 分钟</small></div>
+      <button class="btnround" onclick={() => stepPomodoroBreak(1)}>+</button>
+    </div>
+  {:else}
+    <div style="font-weight:600;margin-bottom:4px;">提醒间隔</div>
+    <div class="stepper">
+      <button class="btnround" onclick={() => stepInterval(-5)}>−</button>
+      <div class="val">{curInterval}<small> 分钟</small></div>
+      <button class="btnround" onclick={() => stepInterval(5)}>+</button>
+    </div>
+    <div class="chips" style="margin-top:10px;">
+      <div class="chip" onclick={() => setIntervalVal(20)}>20</div>
+      <div class="chip" onclick={() => setIntervalVal(45)}>45</div>
+      <div class="chip" onclick={() => setIntervalVal(60)}>60</div>
+      <div class="chip" onclick={() => setIntervalVal(90)}>90</div>
+    </div>
+  {/if}
+  <div class="field">
+    <label>提醒文案</label>
+    <input value={curMessage} oninput={(e) => updateMessage(e.currentTarget.value)} placeholder="如：看看远处，放松双眼 20 秒" />
+  </div>
+  <div class="field">
+    <label>提示音</label>
+    <div class="sounds">
+      {#each sounds as s}
+        <div class="s {curSound === s ? 'sel' : ''}" onclick={() => updateSound(s)}>
+          {s === 'bell' ? '🔔 轻柔铃' : s === 'wave' ? '🌊 海浪' : s === 'wood' ? '🎵 木鱼' : '🔕 静音'}
+        </div>
+      {/each}
+    </div>
+  </div>
+</div>
+{/if}
 
 <div class="sectiontitle">提醒时段</div>
 <div class="card">
